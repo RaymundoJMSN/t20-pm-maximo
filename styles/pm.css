@@ -12,3 +12,12 @@
   color: #b03030;
   font-weight: bold;
 }
+
+/* Botões "escolher 10/20" no diálogo de uso */
+.t20pm-escolher {
+  flex: 0 0 auto;
+  font-size: 0.85em;
+  padding: 2px 6px;
+  line-height: 1.4;
+  white-space: nowrap;
+}

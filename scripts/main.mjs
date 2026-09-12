@@ -103,7 +103,8 @@ Hooks.on("renderAbilityUseDialog", async (app, html) => {
   const pm = actor.system.attributes?.pm ?? { value: 0, temp: 0 };
   const base = Number(item.system?.ativacao?.custo) || 0;
   const limite = await limiteDoItem(item);
-  const aprimoramentos = item.effects.filter((e) => e.flags?.tormenta20?.onuse);
+  // Rolagem de perícia/atributo chega como objeto simples, sem `effects`.
+  const aprimoramentos = (item.effects ?? []).filter((e) => e.flags?.tormenta20?.onuse);
   const teto = tetoDoUso(limite, pm);
   const bloquear = game.settings.get(ID, "bloquear");
 
@@ -155,6 +156,71 @@ Hooks.on("renderAbilityUseDialog", async (app, html) => {
   form.addEventListener("change", atualizar);
   form.addEventListener("click", () => setTimeout(atualizar, 0)); // os botões –/+ do sistema
   atualizar();
+  botoesDeEscolha(app, raiz);
 });
 
-globalThis.t20PmMaximo = { limiteDoItem };
+/* ──────────────────── escolher 10 / escolher 20 ────────────────────
+ * O livro deixa escolher 10 (sem pressa e sem risco) ou 20 (20× o tempo) em
+ * vez de rolar. O sistema não tem isso, e o d20 é criado dentro de uma função
+ * interna — então o caminho é: o botão marca a intenção, a rolagem acontece
+ * normal (com todos os bônus que o jogador aplicar) e, antes do card ir para o
+ * chat, trocamos o resultado do d20 pelo valor escolhido.
+ */
+let escolhaPendente = null;
+
+function botoesDeEscolha(app, raiz) {
+  const barra = raiz.closest(".app")?.querySelector(".dialog-buttons") ?? raiz.querySelector(".dialog-buttons");
+  if (!barra || barra.querySelector(".t20pm-escolher")) return;
+  const actor = app.item?.actor;
+  if (!actor) return;
+
+  for (const valor of [10, 20]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "t20pm-escolher";
+    b.innerHTML = `<i class="fas fa-hand-pointer"></i> Escolher ${valor}`;
+    b.title =
+      valor === 10
+        ? "Sem pressa e sem risco: o d20 vale 10 (Tormenta20 p. 103)."
+        : "Leva 20× o tempo e só vale sem risco de falha: o d20 vale 20.";
+    b.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      escolhaPendente = { actorId: actor.id, valor, quando: Date.now() };
+      // Segue o fluxo normal do sistema: aplica o que o jogador marcou.
+      const usar = barra.querySelector("button:not(.t20pm-escolher)");
+      usar?.click();
+    });
+    barra.prepend(b);
+  }
+}
+
+Hooks.on("preCreateChatMessage", (msg) => {
+  const pendente = escolhaPendente;
+  if (!pendente) return;
+  // Vale só para a rolagem que veio logo em seguida.
+  if (Date.now() - pendente.quando > 15000) {
+    escolhaPendente = null;
+    return;
+  }
+  const rolls = msg.rolls ?? [];
+  const trocados = [];
+  for (const roll of rolls) {
+    const d20 = roll.dice?.find((d) => d.faces === 20);
+    if (!d20) {
+      trocados.push(roll);
+      continue;
+    }
+    const antes = d20.total;
+    for (const r of d20.results) r.result = pendente.valor;
+    roll._total = Math.round((roll.total - antes + d20.total) * 100) / 100;
+    trocados.push(roll);
+  }
+  if (!trocados.length) return;
+  escolhaPendente = null;
+  msg.updateSource({
+    rolls: trocados.map((r) => JSON.stringify(r)),
+    flavor: `${msg.flavor ?? ""} <em>(escolheu ${pendente.valor})</em>`,
+  });
+});
+
+globalThis.t20PmMaximo = { limiteDoItem, escolher: (valor) => (escolhaPendente = { valor, quando: Date.now() }) };
