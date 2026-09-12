@@ -174,7 +174,7 @@ function botoesDeEscolha(app, raiz) {
   const actor = app.item?.actor;
   if (!actor) return;
 
-  for (const valor of [10, 20]) {
+  const criar = (valor) => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "t20pm-escolher";
@@ -187,11 +187,17 @@ function botoesDeEscolha(app, raiz) {
       ev.preventDefault();
       escolhaPendente = { actorId: actor.id, valor, quando: Date.now() };
       // Segue o fluxo normal do sistema: aplica o que o jogador marcou.
-      const usar = barra.querySelector("button:not(.t20pm-escolher)");
-      usar?.click();
+      barra.querySelector("button:not(.t20pm-escolher)")?.click();
     });
-    barra.prepend(b);
-  }
+    return b;
+  };
+  // 10 à esquerda, o botão de rolar do sistema no meio, 20 à direita.
+  barra.prepend(criar(10));
+  barra.append(criar(20));
+  barra.classList.add("t20pm-barra");
+  // A janela foi medida antes dos nossos botões e do aviso: remedir para não
+  // sobrar rolagem interna.
+  requestAnimationFrame(() => app.setPosition({ height: "auto" }));
 }
 
 Hooks.on("preCreateChatMessage", (msg) => {

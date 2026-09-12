@@ -21,3 +21,15 @@
   line-height: 1.4;
   white-space: nowrap;
 }
+
+/* 10 à esquerda, rolar no meio, 20 à direita — tudo numa linha só */
+.dialog-buttons.t20pm-barra {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.dialog-buttons.t20pm-barra > button {
+  flex: 1 1 auto;
+}
