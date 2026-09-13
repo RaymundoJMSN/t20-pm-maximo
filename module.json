@@ -3,14 +3,35 @@
   "title": "PM Máximo — Tormenta20",
   "description": "Aplica o limite de gasto de PM por uso: nível na classe que fornece a habilidade (nível de personagem para raça, origem e poderes gerais), somando o atributo-chave quando há Magia Ilimitada. Desliga os aprimoramentos que não cabem e segura o uso de quem está sem PM.",
   "version": "0.1.0",
-  "compatibility": { "minimum": "13", "verified": "13" },
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13"
+  },
   "relationships": {
     "requires": [
-      { "id": "tormenta20", "type": "system", "compatibility": { "minimum": "1.5.0" } }
+      {
+        "id": "tormenta20",
+        "type": "system",
+        "compatibility": {
+          "minimum": "1.5.0"
+        }
+      }
     ]
   },
-  "esmodules": ["scripts/main.mjs"],
-  "styles": ["styles/pm.css"],
-  "authors": [{ "name": "RaymundoJMSN" }],
-  "license": "MIT"
+  "esmodules": [
+    "scripts/main.mjs"
+  ],
+  "styles": [
+    "styles/pm.css"
+  ],
+  "authors": [
+    {
+      "name": "RaymundoNeto",
+      "url": "https://github.com/RaymundoJMSN"
+    }
+  ],
+  "license": "MIT",
+  "url": "https://github.com/RaymundoJMSN/t20-pm-maximo",
+  "manifest": "https://raw.githubusercontent.com/RaymundoJMSN/t20-pm-maximo/main/module.json",
+  "download": "https://github.com/RaymundoJMSN/t20-pm-maximo/archive/refs/heads/main.zip"
 }

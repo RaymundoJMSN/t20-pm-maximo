@@ -33,3 +33,7 @@
 .dialog-buttons.t20pm-barra > button {
   flex: 1 1 auto;
 }
+
+/* aprimoramento que exige círculo acima do que a ficha lança */
+.t20pm-sem-circulo { opacity: 0.45; }
+.t20pm-sem-circulo .item-name::after { content: " (círculo insuficiente)"; font-size: 0.85em; font-style: italic; }

@@ -9,11 +9,19 @@
  *
  * Casa com o t20-fabricar: os dois leem o mesmo limite.
  */
-import { FONTE, limiteDePM, podeSomar, temPM, tetoDoUso } from "./regras.mjs";
+import { FONTE, limiteDePM, podeSomar, temPM, tetoDoUso, circuloMaximo, circuloExigido, limitadoPorCirculo, vezesPorCirculo } from "./regras.mjs";
 
 const ID = "t20-pm-maximo";
 /** "Você soma seu atributo-chave no limite de PM que pode gastar numa magia." */
 const MAGIA_ILIMITADA = /magia\s+ilimitada/i;
+
+/** Maior círculo de magia que a ficha lança (classes conhecidas, Ladrão Arcano, ou a maior magia). */
+const circuloMaximoDe = (actor) =>
+  circuloMaximo({
+    classes: actor.items.filter((i) => i.type === "classe").map((i) => ({ nome: i.name, nivel: i.system.niveis })),
+    ladraoArcano: actor.items.some((i) => i.type === "poder" && /ladr[aã]o\s+arcano/i.test(i.name)),
+    maiorMagia: Math.max(0, ...actor.items.filter((i) => i.type === "magia").map((i) => Number(i.system.circulo) || 0)),
+  });
 
 const temMagiaIlimitada = (actor) =>
   actor.items.some((i) => ["poder", "classe"].includes(i.type) && MAGIA_ILIMITADA.test(i.name));
@@ -80,14 +88,23 @@ async function limiteDoItem(item) {
   });
 }
 
+/** Aprimoramentos como o diálogo os mostra: campo `aplica` + custo escondido ao lado.
+ * Lido do formulário porque o sistema mistura efeitos do item e do ator (Tomo Hermético). */
+function camposDoDialogo(form) {
+  return [...form.querySelectorAll('[name^="aprs."][name$=".aplica"]')].map((campo) => {
+    const id = campo.name.slice(5, -7);
+    const custo = Number(form.querySelector(`[name="aprs.${id}.custo"]`)?.value) || 0; // "Truque" → 0
+    const texto = campo.closest("li")?.querySelector(".item-name")?.textContent ?? "";
+    return { campo, custo, texto };
+  });
+}
+
 /** Custo somado do que está marcado no diálogo de uso. */
-function custoMarcado(form, aprimoramentos, base) {
+function custoMarcado(form, base) {
   let custo = Number(base) || 0;
-  for (const ap of aprimoramentos) {
-    const campo = form.querySelector(`[name="aprs.${ap.id}.aplica"]`);
-    if (!campo) continue;
+  for (const { campo, custo: custoAp } of camposDoDialogo(form)) {
     const vezes = campo.type === "checkbox" ? (campo.checked ? 1 : 0) : Number(campo.value) || 0;
-    custo += vezes * (Number(ap.flags?.tormenta20?.custo) || 0);
+    custo += vezes * custoAp;
   }
   return custo;
 }
@@ -103,10 +120,9 @@ Hooks.on("renderAbilityUseDialog", async (app, html) => {
   const pm = actor.system.attributes?.pm ?? { value: 0, temp: 0 };
   const base = Number(item.system?.ativacao?.custo) || 0;
   const limite = await limiteDoItem(item);
-  // Rolagem de perícia/atributo chega como objeto simples, sem `effects`.
-  const aprimoramentos = (item.effects ?? []).filter((e) => e.flags?.tormenta20?.onuse);
   const teto = tetoDoUso(limite, pm);
   const bloquear = game.settings.get(ID, "bloquear");
+  const circuloMax = item.type === "magia" ? circuloMaximoDe(actor) : 0;
 
   // Sem PM nem para o custo mínimo: nem abre para gastar.
   if (!temPM(base, pm)) {
@@ -123,31 +139,48 @@ Hooks.on("renderAbilityUseDialog", async (app, html) => {
   aviso.className = "t20pm-aviso";
   form.prepend(aviso);
 
-  const atualizar = () => {
-    const custo = custoMarcado(form, aprimoramentos, base);
-    const sobra = teto - custo;
-    aviso.innerHTML = `<b>Limite de PM:</b> ${limite}${
-      limite !== teto ? ` <span class="t20pm-obs">(você só tem ${pm.value + (pm.temp || 0)} PM)</span>` : ""
-    } · <b>gastando ${custo}</b>${sobra < 0 ? ' <span class="t20pm-ruim">acima do limite</span>' : ""}`;
+  // Aprimoramento que pede círculo que a ficha não tem: some do jogo (uma vez só).
+  if (bloquear && circuloMax) {
+    for (const { campo, texto } of camposDoDialogo(form)) {
+      if (circuloExigido(texto) <= circuloMax) continue;
+      campo.disabled = true;
+      if (campo.type === "checkbox") campo.checked = false;
+      else campo.value = "0";
+      campo.closest("li")?.classList.add("t20pm-sem-circulo");
+    }
+  }
 
-    // Desliga o que não cabe mais (checkbox) e limita o passo a passo (número).
-    for (const ap of aprimoramentos) {
-      const campo = form.querySelector(`[name="aprs.${ap.id}.aplica"]`);
-      if (!campo) continue;
-      const custoAp = Number(ap.flags?.tormenta20?.custo) || 0;
-      if (campo.type === "checkbox") {
-        if (!campo.checked && bloquear) campo.disabled = !podeSomar(custo, custoAp, teto);
-      } else {
+  const atualizar = () => {
+    let custo = custoMarcado(form, base);
+
+    if (bloquear) {
+      // O –/+ do sistema ignora `max`: passou do teto, volta o campo e reconta.
+      for (const { campo, custo: custoAp, texto } of camposDoDialogo(form)) {
+        if (campo.type === "checkbox" || custoAp <= 0) continue;
         const atual = Number(campo.value) || 0;
-        const maximo = custoAp > 0 ? atual + Math.max(0, Math.floor((teto - custo) / custoAp)) : 99;
-        if (bloquear) campo.max = String(maximo);
-        if (bloquear && atual > maximo) campo.value = String(maximo);
+        let maximo = atual + Math.floor((teto - custo) / custoAp);
+        if (circuloMax && limitadoPorCirculo(texto)) maximo = Math.min(maximo, vezesPorCirculo(circuloMax));
+        campo.max = String(Math.max(atual, maximo, 0));
+        if (atual > maximo && maximo >= 0) {
+          campo.value = String(maximo);
+          custo = custoMarcado(form, base);
+          app._onInputChange?.(app.element); // o total de PM do sistema já tinha somado o clique
+        }
+      }
+      // Desliga o checkbox que não cabe mais.
+      for (const { campo, custo: custoAp } of camposDoDialogo(form)) {
+        if (campo.type === "checkbox" && !campo.checked) campo.disabled = !podeSomar(custo, custoAp, teto);
       }
     }
 
+    const sobra = teto - custo;
+    aviso.innerHTML = `<b>Limite de PM:</b> ${limite}${circuloMax ? ` · <b>círculo máximo:</b> ${circuloMax}º` : ""}${
+      limite !== teto ? ` <span class="t20pm-obs">(você só tem ${pm.value + (pm.temp || 0)} PM)</span>` : ""
+    } · <b>gastando ${custo}</b>${sobra < 0 ? ' <span class="t20pm-ruim">acima do limite</span>' : ""}`;
+
     if (bloquear) {
       raiz.querySelectorAll("button").forEach((b) => {
-        if (b.dataset.button === "cancel" || /cancel/i.test(b.className)) return;
+        if (b.classList.contains("numCtrl") || b.dataset.button === "cancel" || /cancel/i.test(b.className)) return;
         b.disabled = custo > teto && custo > base;
       });
     }
@@ -172,7 +205,7 @@ function botoesDeEscolha(app, raiz) {
   const barra = raiz.closest(".app")?.querySelector(".dialog-buttons") ?? raiz.querySelector(".dialog-buttons");
   if (!barra || barra.querySelector(".t20pm-escolher")) return;
   const actor = app.item?.actor;
-  if (!actor) return;
+  if (!actor || app.item?.type !== "pericia") return; // escolher 10/20 é regra de teste de perícia
 
   const criar = (valor) => {
     const b = document.createElement("button");

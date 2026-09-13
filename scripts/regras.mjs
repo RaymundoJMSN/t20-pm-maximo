@@ -51,6 +51,49 @@ export const temPM = (custo, { value = 0, temp = 0 } = {}) => custo <= (Number(v
 /** Quanto ainda dá para gastar: o menor entre o que sobra de limite e de PM. */
 export const tetoDoUso = (limite, pm) => Math.min(limite, (Number(pm?.value) || 0) + (Number(pm?.temp) || 0));
 
+
+/* ───────────────────────── círculo máximo de magia ─────────────────────────
+ * Duas progressões no livro: conjurador cheio (2º no 5º, +1 a cada 4 níveis) e
+ * parcial (2º no 6º, 3º no 10º, 4º no 14º). Ladrão Arcano rouba até 4º.
+ */
+const CHEIO = { 2: 5, 3: 9, 4: 13, 5: 17 };
+const PARCIAL = { 2: 6, 3: 10, 4: 14 };
+// ponytail: engenhoca do inventor (6/10/14/18) fora — só vale para item tipo "eng"
+export const PROGRESSAO_CIRCULO = {
+  arcanista: CHEIO, necromante: CHEIO, clerigo: CHEIO, usurpador: CHEIO, frade: CHEIO,
+  bardo: PARCIAL, magimarcialista: PARCIAL, druida: PARCIAL, ermitao: PARCIAL, ventanista: PARCIAL,
+};
+
+export const slug = (nome) =>
+  String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/\s+/g, "_");
+
+/** Círculo que um nível numa classe alcança (0 = não conjura). */
+export function circuloDaClasse(nome, nivel) {
+  const prog = PROGRESSAO_CIRCULO[slug(nome)];
+  if (!prog || nivel < 1) return 0;
+  let c = 1;
+  for (const [circ, n] of Object.entries(prog)) if (nivel >= n) c = Math.max(c, Number(circ));
+  return c;
+}
+
+/**
+ * @param {{classes?:{nome:string,nivel:number}[], ladraoArcano?:boolean, maiorMagia?:number}} e
+ * `maiorMagia` = maior círculo entre as magias da ficha (fallback para classe desconhecida).
+ */
+export function circuloMaximo({ classes = [], ladraoArcano = false, maiorMagia = 0 } = {}) {
+  const porClasse = Math.max(0, ...classes.map((c) => circuloDaClasse(c.nome, Number(c.nivel) || 0)));
+  return Math.max(porClasse, ladraoArcano ? 4 : 0, porClasse ? 0 : Number(maiorMagia) || 0);
+}
+
+/** "Requer 3º círculo" → 3; sem exigência → 0. */
+export const circuloExigido = (texto) => Number(/requer\s+(\d)\s*[ºo°]?\s*c[ií]rculo/i.exec(texto || "")?.[1]) || 0;
+
+/** "limitado pelo círculo máximo de magia que você pode lançar" */
+export const limitadoPorCirculo = (texto) => /limitad[oa]\s+pelo\s+c[ií]rculo\s+m[aá]ximo/i.test(texto || "");
+
+/** Quantas vezes um aprimoramento "limitado pelo círculo" pode entrar: uma por círculo (leitura da mesa). */
+export const vezesPorCirculo = (circuloMax) => Math.max(0, Number(circuloMax) || 0);
+
 /* ────────────────────────────── self-test ────────────────────────────── */
 function check() {
   const ok = [];
@@ -83,6 +126,24 @@ function check() {
   eq("sem PM não usa", temPM(3, { value: 2 }), false);
   eq("teto é o menor dos dois", tetoDoUso(9, { value: 4, temp: 0 }), 4);
   eq("teto respeita o limite", tetoDoUso(3, { value: 40 }), 3);
+
+  eq("arcanista 5º lança 2º círculo", circuloDaClasse("Arcanista", 5), 2);
+  eq("arcanista 4º ainda 1º", circuloDaClasse("Arcanista", 4), 1);
+  eq("bardo 14º lança 4º", circuloDaClasse("Bardo", 14), 4);
+  eq("druida 20º para no 4º", circuloDaClasse("Druida", 20), 4);
+  eq("necromante herda do arcanista", circuloDaClasse("Necromante", 17), 5);
+  eq("guerreiro não conjura", circuloDaClasse("Guerreiro", 20), 0);
+  eq("multiclasse pega o maior", circuloMaximo({ classes: [{ nome: "Guerreiro", nivel: 10 }, { nome: "Clérigo", nivel: 9 }] }), 3);
+  eq("Ladrão Arcano dá 4º", circuloMaximo({ classes: [{ nome: "Ladino", nivel: 13 }], ladraoArcano: true }), 4);
+  eq("sem classe conhecida usa a maior magia", circuloMaximo({ classes: [{ nome: "Sábio", nivel: 9 }], maiorMagia: 2 }), 2);
+  eq("classe conhecida ignora a maior magia", circuloMaximo({ classes: [{ nome: "Arcanista", nivel: 1 }], maiorMagia: 3 }), 1);
+  eq("lê 'Requer 3º círculo'", circuloExigido("muda a duração para cena. Requer 3º círculo."), 3);
+  eq("lê 'Requer 4° Círculo' com grau", circuloExigido("Requer 4° Círculo."), 4);
+  eq("lê quebra de linha", circuloExigido("Requer 3º\ncírculo."), 3);
+  eq("sem exigência", circuloExigido("muda o alcance para curto."), 0);
+  eq("detecta limitado pelo círculo", limitadoPorCirculo("aumenta o bônus em +1 (bônus máximo limitado pelo círculo máximo de magia que você pode lançar)."), true);
+  eq("limitado pelo círculo: 1 clique por círculo", vezesPorCirculo(3), 3);
+  eq("1º círculo deixa 1", vezesPorCirculo(1), 1);
 
   const ruins = ok.filter(([, bom]) => !bom);
   for (const [nome, , a, b] of ruins) console.error(`FALHOU: ${nome} — ${JSON.stringify(a)} != ${JSON.stringify(b)}`);
