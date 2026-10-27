@@ -121,6 +121,9 @@ export function cdSemFoco({ custo = 0, temCusto = false, extra = 0, truque = fal
   return 20 + pm;
 }
 
+/** O d20 do teste deu 20 natural (com vantagem, o dado que ficou). */
+export const vinteNatural = (roll) => roll?.dice?.find((d) => d.faces === 20)?.total === 20;
+
 /* ────────────────────────────── self-test ────────────────────────────── */
 function check() {
   const ok = [];
@@ -185,6 +188,10 @@ function check() {
   eq("sem foco: soma custoPM da ficha", cdSemFoco({ custo: 3, temCusto: true, extra: 1 }), 24);
   eq("sem foco: truque = CD 20", cdSemFoco({ custo: 1, temCusto: true, truque: true }), 20);
   eq("sem foco: metade arredonda pra baixo", cdSemFoco({ custo: 5, temCusto: true, metade: true }), 22);
+  eq("20 natural", vinteNatural({ dice: [{ faces: 20, total: 20 }] }), true);
+  eq("19 não é 20 natural", vinteNatural({ dice: [{ faces: 20, total: 19 }] }), false);
+  eq("20 no d6 não conta", vinteNatural({ dice: [{ faces: 6, total: 20 }, { faces: 20, total: 3 }] }), false);
+  eq("sem rolagem", vinteNatural(null), false);
 
   const ruins = ok.filter(([, bom]) => !bom);
   for (const [nome, , a, b] of ruins) console.error(`FALHOU: ${nome} — ${JSON.stringify(a)} != ${JSON.stringify(b)}`);

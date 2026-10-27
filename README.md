@@ -25,7 +25,8 @@ uso de magia/poder/item.
 - **Conjurar sem foco** (poder caseiro): caixinha em Configurações de Personagem, abaixo de
   "Escrever Pergaminhos". Ligada, toda magia rola Misticismo contra **CD 20 + PM gasto**; falhou,
   os PM vão embora e o card da magia não aparece. Se o teste for alterado depois e passar
-  (Inspiração, bônus), o card sai. O card pendente fica na memória de quem conjurou (F5 perde).
+  (Inspiração, bônus), o card sai. **20 natural** passa sempre e dobra os dados de dano
+  (14d6 → 28d6). A magia pendente fica na memória de quem conjurou (F5 perde).
 
 Multiclasse é aproximação: sem dado de "qual classe deu esta habilidade", usa a classe de maior
 nível.

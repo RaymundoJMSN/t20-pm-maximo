@@ -9,7 +9,7 @@
  *
  * Casa com o t20-fabricar: os dois leem o mesmo limite.
  */
-import { cdSemFoco, FONTE, limiteDePM, podeSomar, temPM, tetoDoUso, circuloMaximo, circuloExigido, limitadoPorCirculo, vezesPorCirculo } from "./regras.mjs";
+import { cdSemFoco, vinteNatural, FONTE, limiteDePM, podeSomar, temPM, tetoDoUso, circuloMaximo, circuloExigido, limitadoPorCirculo, vezesPorCirculo } from "./regras.mjs";
 
 const ID = "t20-pm-maximo";
 /** "Você soma seu atributo-chave no limite de PM que pode gastar numa magia." */
@@ -268,13 +268,13 @@ Hooks.on("preCreateChatMessage", (msg) => {
 /* ──────────────────── conjurar sem foco (Misticismo) ────────────────────
  * Poder caseiro: a ficha marcada em Configurações de Personagem testa
  * Misticismo (CD 20 + PM gasto) a cada magia. O sistema já gastou os PM e
- * rolou os dados quando chega no `displayCard`; falhou, o card é montado sem
- * ir pro chat e fica guardado. Se o teste for alterado depois (Inspiração
- * reescreve as rolagens da mesma mensagem) e passar, o card sai.
- * shortcut: o card pendente vive na memória do cliente de quem conjurou — F5 perde, persistir em flag se incomodar.
+ * rolou os dados quando chega no `displayCard`; falhou, a magia fica guardada
+ * sem card. Se o teste for alterado depois (Inspiração reescreve as rolagens da
+ * mesma mensagem) e passar, o card sai. 20 natural passa sempre e dobra os dados de dano.
+ * shortcut: a magia pendente vive na memória do cliente de quem conjurou — F5 perde, persistir em flag se incomodar.
  */
 const SEM_FOCO = "semFoco";
-const pendentes = new Map(); // id da mensagem do teste → { chatData, cd }
+const pendentes = new Map(); // id da mensagem do teste → { item, args, cd }
 
 Hooks.on("renderActorSettings", (app, html) => {
   const raiz = html instanceof HTMLElement ? html : html[0];
@@ -305,10 +305,10 @@ Hooks.once("setup", () => {
       metade: op.halfCost,
     });
     const teste = await actor.rollPericia("mist"); // devolve a mensagem do teste (não aceita flavor)
-    if (teste?.rolls?.[0]?.total >= cd) return original.call(this, args);
+    const roll = teste?.rolls?.[0];
+    if (vinteNatural(roll) || roll?.total >= cd) return soltar(this, args, roll);
 
-    const chatData = await original.call(this, { ...args, createMessage: false });
-    if (teste?.id) pendentes.set(teste.id, { chatData, cd });
+    if (teste?.id) pendentes.set(teste.id, { item: this, args, cd });
     await ChatMessage.create({
       speaker: ChatMessage.getSpeaker({ actor }),
       content: `<p><b>${this.name}</b> não funcionou (Misticismo abaixo da CD ${cd}) — os PM foram gastos.${
@@ -317,13 +317,25 @@ Hooks.once("setup", () => {
     });
     return null;
   };
+
+  /** Manda o card da magia. 20 natural no teste = dano rolado de novo como crítico
+   * (o `damageRoll` do sistema multiplica o primeiro dado: 14d6 → 28d6). */
+  soltar = async (item, args, roll) => {
+    if (vinteNatural(roll) && item.system.rolls?.some((r) => r.type === "dano" && r.parts?.[0]?.[0])) {
+      item.system.criticoX = 2; // magia não tem multiplicador próprio
+      await item.rollDamage({ critical: true, options: { ...args.options, critical: true } });
+    }
+    return original.call(item, args);
+  };
 });
+let soltar;
 
 Hooks.on("updateChatMessage", (msg, mudou) => {
   const p = pendentes.get(msg.id);
-  if (!p || !mudou.rolls || !(msg.rolls?.[0]?.total >= p.cd)) return;
+  const roll = msg.rolls?.[0];
+  if (!p || !mudou.rolls || !(vinteNatural(roll) || roll?.total >= p.cd)) return;
   pendentes.delete(msg.id);
-  ChatMessage.create(p.chatData);
+  soltar(p.item, p.args, roll);
 });
 
 globalThis.t20PmMaximo = { limiteDoItem, escolher: (valor) => (escolhaPendente = { valor, quando: Date.now() }) };
