@@ -9,11 +9,13 @@
  *
  * Casa com o t20-fabricar: os dois leem o mesmo limite.
  */
-import { FONTE, limiteDePM, podeSomar, temPM, tetoDoUso, circuloMaximo, circuloExigido, limitadoPorCirculo, vezesPorCirculo } from "./regras.mjs";
+import { cdSemFoco, FONTE, limiteDePM, podeSomar, temPM, tetoDoUso, circuloMaximo, circuloExigido, limitadoPorCirculo, vezesPorCirculo } from "./regras.mjs";
 
 const ID = "t20-pm-maximo";
 /** "Você soma seu atributo-chave no limite de PM que pode gastar numa magia." */
 const MAGIA_ILIMITADA = /magia\s+ilimitada/i;
+/** Poder concedido de Kallyadranoch: +patamar nos limites de PM, menos em magia. */
+const PODER_SEM_LIMITES = /poder\s+sem\s+limites/i;
 
 /** Maior círculo de magia que a ficha lança (classes conhecidas, Ladrão Arcano, ou a maior magia). */
 const circuloMaximoDe = (actor) =>
@@ -23,8 +25,8 @@ const circuloMaximoDe = (actor) =>
     maiorMagia: Math.max(0, ...actor.items.filter((i) => i.type === "magia").map((i) => Number(i.system.circulo) || 0)),
   });
 
-const temMagiaIlimitada = (actor) =>
-  actor.items.some((i) => ["poder", "classe"].includes(i.type) && MAGIA_ILIMITADA.test(i.name));
+const temPoder = (actor, re) =>
+  actor.items.some((i) => ["poder", "classe"].includes(i.type) && re.test(i.name));
 
 Hooks.once("init", () => {
   game.settings.register(ID, "bloquear", {
@@ -77,7 +79,7 @@ async function limiteDoItem(item) {
   // que não é multiclasse, e o mestre corrige no aviso.
   const niveisDeClasse = actor.items.filter((i) => i.type === "classe").map((i) => Number(i.system.niveis) || 0);
   const nivelPersonagem = Number(actor.system.attributes?.nivel?.value) || Math.max(0, ...niveisDeClasse, 0);
-  const magiaIlimitada = ehMagia && temMagiaIlimitada(actor);
+  const magiaIlimitada = ehMagia && temPoder(actor, MAGIA_ILIMITADA);
   return limiteDePM({
     fonte: ehMagia || item.system?.tipo === "classe" ? FONTE.CLASSE : FONTE.PERSONAGEM,
     nivelClasse: Math.max(0, ...niveisDeClasse, 0),
@@ -85,6 +87,7 @@ async function limiteDoItem(item) {
     ehMagia,
     magiaIlimitada,
     atributoChave: magiaIlimitada ? await atributoChaveDe(actor) : 0,
+    poderSemLimites: !ehMagia && temPoder(actor, PODER_SEM_LIMITES),
   });
 }
 
@@ -260,6 +263,67 @@ Hooks.on("preCreateChatMessage", (msg) => {
     rolls: trocados.map((r) => JSON.stringify(r)),
     flavor: `${msg.flavor ?? ""} <em>(escolheu ${pendente.valor})</em>`,
   });
+});
+
+/* ──────────────────── conjurar sem foco (Misticismo) ────────────────────
+ * Poder caseiro: a ficha marcada em Configurações de Personagem testa
+ * Misticismo (CD 20 + PM gasto) a cada magia. O sistema já gastou os PM e
+ * rolou os dados quando chega no `displayCard`; falhou, o card é montado sem
+ * ir pro chat e fica guardado. Se o teste for alterado depois (Inspiração
+ * reescreve as rolagens da mesma mensagem) e passar, o card sai.
+ * shortcut: o card pendente vive na memória do cliente de quem conjurou — F5 perde, persistir em flag se incomodar.
+ */
+const SEM_FOCO = "semFoco";
+const pendentes = new Map(); // id da mensagem do teste → { chatData, cd }
+
+Hooks.on("renderActorSettings", (app, html) => {
+  const raiz = html instanceof HTMLElement ? html : html[0];
+  const ancora = raiz.querySelector('[name="flags.tormenta20.createScroll"]')?.closest(".form-group");
+  if (!ancora || raiz.querySelector(`[name="flags.${ID}.${SEM_FOCO}"]`)) return;
+  const linha = document.createElement("div");
+  linha.className = "form-group";
+  linha.innerHTML = `<label>Conjurar sem foco (teste de Misticismo)</label>
+    <input type="checkbox" name="flags.${ID}.${SEM_FOCO}" data-dtype="Boolean" ${app.object.getFlag(ID, SEM_FOCO) ? "checked" : ""}>`;
+  ancora.after(linha);
+  app.setPosition({ height: "auto" });
+});
+
+Hooks.once("setup", () => {
+  const proto = CONFIG.Item.documentClass.prototype;
+  const original = proto.displayCard;
+  proto.displayCard = async function (args = {}) {
+    const actor = this.actor;
+    if (this.type !== "magia" || !actor?.getFlag(ID, SEM_FOCO) || args.createMessage === false) {
+      return original.call(this, args);
+    }
+    const op = args.options ?? {};
+    const cd = cdSemFoco({
+      custo: this.system.ativacao?.custo,
+      temCusto: op.hasManaCost,
+      extra: actor.system.modificadores?.custoPM,
+      truque: op.truque,
+      metade: op.halfCost,
+    });
+    const teste = await actor.rollPericia("mist"); // devolve a mensagem do teste (não aceita flavor)
+    if (teste?.rolls?.[0]?.total >= cd) return original.call(this, args);
+
+    const chatData = await original.call(this, { ...args, createMessage: false });
+    if (teste?.id) pendentes.set(teste.id, { chatData, cd });
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor }),
+      content: `<p><b>${this.name}</b> não funcionou (Misticismo abaixo da CD ${cd}) — os PM foram gastos.${
+        teste?.id ? " Se o teste passar (Inspiração, bônus), a magia sai." : ""
+      }</p>`,
+    });
+    return null;
+  };
+});
+
+Hooks.on("updateChatMessage", (msg, mudou) => {
+  const p = pendentes.get(msg.id);
+  if (!p || !mudou.rolls || !(msg.rolls?.[0]?.total >= p.cd)) return;
+  pendentes.delete(msg.id);
+  ChatMessage.create(p.chatData);
 });
 
 globalThis.t20PmMaximo = { limiteDoItem, escolher: (valor) => (escolhaPendente = { valor, quando: Date.now() }) };

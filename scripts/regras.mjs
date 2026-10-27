@@ -10,7 +10,17 @@
  *
  *   Magia Ilimitada (LB p. 131): "Você soma seu atributo-chave no limite de PM
  *   que pode gastar numa magia."
+ *
+ *   Poder Sem Limites (Deuses de Arton, concedido de Kallyadranoch): "A CD e os
+ *   limites de PM de suas habilidades (exceto magias e habilidades que as
+ *   simulem) aumentam em um valor igual ao seu patamar."
  */
+
+/** Patamar pelo nível (LB p. 32): Iniciante 1, Veterano 2, Campeão 3, Lenda 4. */
+export const patamarDe = (nivel) => {
+  const n = Number(nivel) || 0;
+  return n >= 17 ? 4 : n >= 11 ? 3 : n >= 5 ? 2 : 1;
+};
 
 /** De onde a habilidade vem decide qual nível manda. */
 export const FONTE = { CLASSE: "classe", PERSONAGEM: "personagem" };
@@ -23,6 +33,7 @@ export const FONTE = { CLASSE: "classe", PERSONAGEM: "personagem" };
  * @param {boolean} e.magiaIlimitada  tem o poder (só vale para magia)
  * @param {number} e.atributoChave    valor do atributo-chave de conjuração
  * @param {boolean} e.ehMagia
+ * @param {boolean} e.poderSemLimites  tem o poder (não vale para magia)
  */
 export function limiteDePM({
   fonte = FONTE.PERSONAGEM,
@@ -31,10 +42,13 @@ export function limiteDePM({
   magiaIlimitada = false,
   atributoChave = 0,
   ehMagia = false,
+  poderSemLimites = false,
 } = {}) {
   const base = fonte === FONTE.CLASSE ? nivelClasse : nivelPersonagem;
   const extra = ehMagia && magiaIlimitada ? Math.max(0, Number(atributoChave) || 0) : 0;
-  return Math.max(1, base + extra); // sempre dá para gastar pelo menos 1
+  // ponytail: "habilidades que as simulem" não dá para ler da ficha — só magia fica de fora.
+  const patamar = poderSemLimites && !ehMagia ? patamarDe(nivelPersonagem || nivelClasse) : 0;
+  return Math.max(1, base + extra + patamar); // sempre dá para gastar pelo menos 1
 }
 
 /** O custo mínimo sempre passa: o limite corta os aprimoramentos, não o uso. */
@@ -94,6 +108,19 @@ export const limitadoPorCirculo = (texto) => /limitad[oa]\s+pelo\s+c[ií]rculo\s
 /** Quantas vezes um aprimoramento "limitado pelo círculo" pode entrar: uma por círculo (leitura da mesa). */
 export const vezesPorCirculo = (circuloMax) => Math.max(0, Number(circuloMax) || 0);
 
+/**
+ * Conjurar sem foco (poder caseiro da Bruxa): teste de Misticismo contra CD 20 +
+ * o PM que a magia custou. O custo é a mesma conta do `ItemT20.displayCard`
+ * (custo ≥1 se a magia tem custo, + `custoPM` da ficha, truque 0, metade arredonda pra baixo).
+ */
+export function cdSemFoco({ custo = 0, temCusto = false, extra = 0, truque = false, metade = false } = {}) {
+  let pm = Math.max(Number(custo) || 0, 0) || (temCusto ? 1 : 0);
+  pm += Number(extra) || 0;
+  if (truque) pm = 0;
+  else if (metade) pm = Math.floor(pm / 2);
+  return 20 + pm;
+}
+
 /* ────────────────────────────── self-test ────────────────────────────── */
 function check() {
   const ok = [];
@@ -113,6 +140,15 @@ function check() {
     limiteDePM({ fonte: FONTE.PERSONAGEM, nivelPersonagem: 5, atributoChave: 4, magiaIlimitada: true }),
     5
   );
+  // Poder Sem Limites: devoto de Kallyadranoch de 11º (Campeão) usa poder geral até 11+3.
+  eq("Poder Sem Limites soma o patamar", limiteDePM({ fonte: FONTE.PERSONAGEM, nivelPersonagem: 11, poderSemLimites: true }), 14);
+  eq(
+    "Poder Sem Limites não vale em magia",
+    limiteDePM({ fonte: FONTE.CLASSE, nivelClasse: 11, nivelPersonagem: 11, ehMagia: true, poderSemLimites: true }),
+    11
+  );
+  eq("patamar por faixa", [1, 4, 5, 10, 11, 16, 17, 20].map(patamarDe), [1, 1, 2, 2, 3, 3, 4, 4]);
+
   eq("atributo negativo não tira do limite", limiteDePM({ fonte: FONTE.CLASSE, nivelClasse: 5, atributoChave: -2, magiaIlimitada: true, ehMagia: true }), 5);
 
   eq("dentro do limite passa", cabeNoLimite(5, 5), true);
@@ -144,6 +180,11 @@ function check() {
   eq("detecta limitado pelo círculo", limitadoPorCirculo("aumenta o bônus em +1 (bônus máximo limitado pelo círculo máximo de magia que você pode lançar)."), true);
   eq("limitado pelo círculo: 1 clique por círculo", vezesPorCirculo(3), 3);
   eq("1º círculo deixa 1", vezesPorCirculo(1), 1);
+  eq("sem foco: 3 PM = CD 23", cdSemFoco({ custo: 3, temCusto: true }), 23);
+  eq("sem foco: custo 0 com custo vira 1", cdSemFoco({ custo: 0, temCusto: true }), 21);
+  eq("sem foco: soma custoPM da ficha", cdSemFoco({ custo: 3, temCusto: true, extra: 1 }), 24);
+  eq("sem foco: truque = CD 20", cdSemFoco({ custo: 1, temCusto: true, truque: true }), 20);
+  eq("sem foco: metade arredonda pra baixo", cdSemFoco({ custo: 5, temCusto: true, metade: true }), 22);
 
   const ruins = ok.filter(([, bom]) => !bom);
   for (const [nome, , a, b] of ruins) console.error(`FALHOU: ${nome} — ${JSON.stringify(a)} != ${JSON.stringify(b)}`);
